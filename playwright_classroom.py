@@ -23,136 +23,58 @@ def open_classroom():
     return playwright, context, page
 
 
-def get_courses(page):
+def open_course(page, course_link):
 
-    print("\n===== FINDING COURSES =====\n")
+    print("\nOpening course with Playwright...")
 
-    # Classroom course cards normally contain links to /c/<course-id>
-    course_links = page.locator('a[href*="/c/"]')
+    page.goto(course_link)
 
-    courses = []
+    page.wait_for_load_state("domcontentloaded")
 
-    for i in range(course_links.count()):
-
-        link = course_links.nth(i)
-
-        try:
-            name = link.inner_text().strip()
-            href = link.get_attribute("href")
-
-            if name and href and "/c/" in href:
-
-                # Avoid duplicates
-                if not any(course["href"] == href for course in courses):
-
-                    courses.append({
-                        "name": name,
-                        "href": href
-                    })
-
-        except Exception:
-            continue
-
-    print(f"Found {len(courses)} possible courses.\n")
-
-    for course in courses:
-        print(course["name"])
-        print(course["href"])
-        print()
-
-    return courses
+    print("Opened:", page.url)
 
 
-def get_assignments(page):
+def open_add_or_create(page):
 
-    print("\n===== READING ASSIGNMENTS =====\n")
+    print("\n===== OPENING ADD OR CREATE =====")
+
+    button = page.get_by_role(
+        "button",
+        name="Add or create"
+    )
+
+    button.click()
+
+    page.wait_for_timeout(1000)
+
+    print("Add or create menu opened.")
+
+
+def read_assignment(page):
+
+    print("\n===== ASSIGNMENT PAGE =====")
+
+    page.wait_for_timeout(2000)
+
+    text = page.locator("body").inner_text()
+
+    print(text)
+
+    return text
+
+def open_assignment(page, assignment_link):
+
+    print("\nOpening assignment with Playwright...")
+
+    page.goto(assignment_link)
+
+    page.wait_for_load_state("domcontentloaded")
 
     page.wait_for_timeout(1500)
 
-    assignment_links = page.locator('a[href*="/a/"]')
+    print("Opened:", page.url)
 
-    assignments = []
+    read_assignment(page)
 
-    for i in range(assignment_links.count()):
+    open_add_or_create(page)
 
-        link = assignment_links.nth(i)
-
-        try:
-            title = link.inner_text().strip()
-            href = link.get_attribute("href")
-
-            if not title or not href:
-                continue
-
-            # Avoid duplicates
-            if any(a["url"] == href for a in assignments):
-                continue
-
-            assignments.append({
-                "title": title,
-                "url": href
-            })
-
-        except Exception:
-            continue
-
-    print(f"Found {len(assignments)} assignment links.")
-
-    for assignment in assignments:
-
-        print("\nTitle:", assignment["title"])
-        print("URL:", assignment["url"])
-
-    return assignments
-
-
-if __name__ == "__main__":
-
-    playwright, context, page = open_classroom()
-
-    print("Google Classroom opened!")
-    print("URL:", page.url)
-
-    # Give the page time to finish rendering
-    page.wait_for_timeout(2000)
-
-    courses = get_courses(page)
-
-    print("\n===== STARTING COURSE LOOP =====")
-
-    for index, course in enumerate(courses, start=1):
-
-        print("\n" + "=" * 60)
-        print(f"COURSE {index}: {course['name']}")
-        print("=" * 60)
-
-        # Navigate directly to the course
-        page.goto(
-            "https://classroom.google.com" + course["href"]
-            if course["href"].startswith("/")
-            else course["href"]
-        )
-
-        page.wait_for_load_state("domcontentloaded")
-
-        page.wait_for_timeout(1500)
-
-        print("Course URL:", page.url)
-
-        get_assignments(page)
-
-        # Go back to Classroom home for the next course
-        page.goto("https://classroom.google.com")
-
-        page.wait_for_load_state("domcontentloaded")
-
-        page.wait_for_timeout(1000)
-
-    print("\n===== LOOP COMPLETED =====")
-
-    input("\nPress Enter to close...")
-
-    if not page.is_closed():
-        context.close()
-
-    playwright.stop()
