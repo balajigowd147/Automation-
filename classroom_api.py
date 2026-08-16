@@ -19,6 +19,7 @@ def get_classroom_service():
     creds = None
 
     if os.path.exists("token.json"):
+
         creds = Credentials.from_authorized_user_file(
             "token.json",
             SCOPES
@@ -27,18 +28,25 @@ def get_classroom_service():
     if not creds or not creds.valid:
 
         if creds and creds.expired and creds.refresh_token:
+
             creds.refresh(Request())
 
         else:
+
             flow = InstalledAppFlow.from_client_secrets_file(
                 "credentials.json",
                 SCOPES
             )
 
-            creds = flow.run_local_server(port=0)
+            creds = flow.run_local_server(
+                port=0
+            )
 
         with open("token.json", "w") as token:
-            token.write(creds.to_json())
+
+            token.write(
+                creds.to_json()
+            )
 
     return build(
         "classroom",
@@ -53,7 +61,10 @@ def get_courses(service):
         pageSize=20
     ).execute()
 
-    return result.get("courses", [])
+    return result.get(
+        "courses",
+        []
+    )
 
 
 def get_assignments(service, course_id):
@@ -62,4 +73,7 @@ def get_assignments(service, course_id):
         courseId=course_id
     ).execute()
 
-    return result.get("courseWork", [])
+    return result.get(
+        "courseWork",
+        []
+    )
