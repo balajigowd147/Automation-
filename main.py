@@ -6,32 +6,24 @@ from classroom_api import (
 
 from playwright_classroom import (
     open_classroom,
-    open_assignment
+    open_assignment,
+    upload_file,
+    turn_in_assignment,
+    review_before_turn_in
 )
 
-
-# --------------------------------
-# 1. Connect to Classroom API
-# --------------------------------
 
 service = get_classroom_service()
 
 courses = get_courses(service)
 
 
-# --------------------------------
-# 2. Start Playwright
-# --------------------------------
 
 playwright, context, page = open_classroom()
 
 
 print("\n===== CLASSROOM AUTOMATION =====")
 
-
-# --------------------------------
-# 3. API + PLAYWRIGHT
-# --------------------------------
 
 for course in courses:
 
@@ -48,19 +40,40 @@ for course in courses:
     print("\nCourse:", course["name"])
     print("Assignment:", assignment["title"])
 
+    # Open assignment
     open_assignment(
         page,
         assignment["alternateLink"]
     )
+
+    # Upload test file
+    upload_file(
+        page,
+        "outputs/test.txt"
+    )
+
+    if review_before_turn_in(page):
+
+        turn_in_assignment(page)
+
+    else:
+
+        print(
+            "\nAssignment was NOT submitted."
+        )
 
     break
 
 
 print("\n===== COMPLETED =====")
 
-input("\nPress Enter to close...")
+input(
+    "\nPress Enter to close..."
+)
+
 
 if not page.is_closed():
+
     context.close()
 
 playwright.stop()
