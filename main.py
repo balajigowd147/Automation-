@@ -1,79 +1,169 @@
-from classroom_api import (
+from classroom.api import (
     get_classroom_service,
     get_courses,
     get_assignments
 )
 
-from playwright_classroom import (
+from browser_automation.browser import (
     open_classroom,
-    open_assignment,
+    open_assignment
+)
+
+from browser_automation.actions import (
+    open_add_or_create,
     upload_file,
-    turn_in_assignment,
-    review_before_turn_in
+    review_before_turn_in,
+    turn_in_assignment
 )
 
 
-service = get_classroom_service()
+def main():
 
-courses = get_courses(service)
-
-
-
-playwright, context, page = open_classroom()
+    print("\n========================================")
+    print("      GOOGLE CLASSROOM AUTOMATION")
+    print("========================================")
 
 
-print("\n===== CLASSROOM AUTOMATION =====")
+    # --------------------------------
+    # 1. Connect to Classroom API
+    # --------------------------------
 
+    print("\nConnecting to Google Classroom API...")
 
-for course in courses:
+    service = get_classroom_service()
 
-    assignments = get_assignments(
-        service,
-        course["id"]
+    courses = get_courses(service)
+
+    print(
+        f"Courses found: {len(courses)}"
     )
 
-    if not assignments:
-        continue
 
-    assignment = assignments[0]
+    # --------------------------------
+    # 2. Start Playwright
+    # --------------------------------
 
-    print("\nCourse:", course["name"])
-    print("Assignment:", assignment["title"])
+    playwright, context, page = open_classroom()
 
-    # Open assignment
-    open_assignment(
-        page,
-        assignment["alternateLink"]
-    )
 
-    # Upload test file
-    upload_file(
-        page,
-        "outputs/test.txt"
-    )
+    try:
 
-    if review_before_turn_in(page):
+        # --------------------------------
+        # 3. Find an assignment
+        # --------------------------------
 
-        turn_in_assignment(page)
+        for course in courses:
 
-    else:
+            assignments = get_assignments(
+                service,
+                course["id"]
+            )
 
-        print(
-            "\nAssignment was NOT submitted."
+            if not assignments:
+                continue
+
+            assignment = assignments[0]
+
+            print("\n========================================")
+            print("COURSE")
+            print("========================================")
+
+            print(
+                "Course:",
+                course["name"]
+            )
+
+            print(
+                "Assignment:",
+                assignment["title"]
+            )
+
+
+            # --------------------------------
+            # 4. Open assignment
+            # --------------------------------
+
+            open_assignment(
+                page,
+                assignment["alternateLink"]
+            )
+
+
+            # --------------------------------
+            # 5. Open Add or create
+            # --------------------------------
+
+            open_add_or_create(page)
+
+
+            # --------------------------------
+            # 6. Upload local file
+            # --------------------------------
+
+            upload_file(
+                page,
+                "outputs/test.txt"
+            )
+
+
+            # --------------------------------
+            # 7. User review + approval
+            # --------------------------------
+
+            approved = review_before_turn_in(
+                page
+            )
+
+
+            # --------------------------------
+            # 8. Turn in only if approved
+            # --------------------------------
+
+            if approved:
+
+                turn_in_assignment(
+                    page
+                )
+
+            else:
+
+                print(
+                    "\nAssignment was NOT submitted."
+                )
+
+
+            # --------------------------------
+            # Currently process only one
+            # assignment for testing
+            # --------------------------------
+
+            break
+
+
+        print("\n========================================")
+        print("          AUTOMATION COMPLETED")
+        print("========================================")
+
+
+        # Keep browser open so you can inspect it
+        input(
+            "\nPress Enter to close the browser..."
         )
 
-    break
+
+    finally:
+
+        # --------------------------------
+        # 9. Close Playwright safely
+        # --------------------------------
+
+        if not page.is_closed():
+
+            context.close()
+
+        playwright.stop()
 
 
-print("\n===== COMPLETED =====")
+if __name__ == "__main__":
 
-input(
-    "\nPress Enter to close..."
-)
-
-
-if not page.is_closed():
-
-    context.close()
-
-playwright.stop()
+    main()
