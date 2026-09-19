@@ -1,137 +1,247 @@
-"""
-Artifact File Reader
-
-Reads the actual contents of files registered in the
-Artifact Registry.
-
-Supported formats:
-    .txt
-    .pdf
-    .docx
-
-The reader does NOT move or copy files.
-
-It receives the real path stored in the registry,
-opens that file, and extracts text from it.
-"""
-
 from pathlib import Path
-
-from pypdf import PdfReader
-from docx import Document
-
-
-# ---------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------
 
 DEFAULT_MAX_CHARS = 5000
 
+def read_txt(path, max_chars=DEFAULT_MAX_CHARS):
 
-# ---------------------------------------------------------
-# TXT reader
-# ---------------------------------------------------------
+    path = Path(path)
 
-def read_txt(path: Path) -> str:
-    """
-    Read a plain text file.
-    """
-
-    return path.read_text(
+    text = path.read_text(
         encoding="utf-8",
         errors="ignore",
     )
+    if max_chars is None:
+        return text
 
+    return text[:max_chars]
 
-# ---------------------------------------------------------
-# PDF reader
-# ---------------------------------------------------------
+def read_pdf(path, max_chars=DEFAULT_MAX_CHARS):
 
-def read_pdf(path: Path) -> str:
-    """
-    Extract text from a PDF file.
-    """
+    from pypdf import PdfReader
+
+    path = Path(path)
 
     reader = PdfReader(str(path))
 
-    pages = []
+    parts = []
+
+    total_chars = 0
 
     for page in reader.pages:
 
-        text = page.extract_text()
+        try:
+            text = page.extract_text() or ""
 
-        if text:
-            pages.append(text)
+        except Exception as error:
 
-    return "\n".join(pages)
+            print(
+                f"[file_reader] Could not read PDF page: "
+                f"{error}"
+            )
 
+            continue
 
-# ---------------------------------------------------------
-# DOCX reader
-# ---------------------------------------------------------
+        if max_chars is None:
 
-def read_docx(path: Path) -> str:
-    """
-    Extract text from a DOCX document.
-    """
+            parts.append(text)
+
+            continue
+
+        remaining = max_chars - total_chars
+
+        if remaining <= 0:
+            break
+
+        text = text[:remaining]
+
+        parts.append(text)
+
+        total_chars += len(text)
+
+    result = "\n".join(parts)
+
+    if max_chars is None:
+        return result
+
+    return result[:max_chars]
+
+def read_docx(path, max_chars=DEFAULT_MAX_CHARS):
+
+    from docx import Document
+
+    path = Path(path)
 
     document = Document(str(path))
 
-    paragraphs = []
+    parts = []
+
+    total_chars = 0
 
     for paragraph in document.paragraphs:
 
         text = paragraph.text.strip()
 
-        if text:
-            paragraphs.append(text)
+        if not text:
+            continue
 
-    return "\n".join(paragraphs)
+        if max_chars is None:
 
+            parts.append(text)
 
-# ---------------------------------------------------------
-# Generic file reader
-# ---------------------------------------------------------
+            continue
+
+        remaining = max_chars - total_chars
+
+        if remaining <= 0:
+            break
+
+        text = text[:remaining]
+
+        parts.append(text)
+
+        total_chars += len(text)
+
+    result = "\n".join(parts)
+
+    if max_chars is None:
+        return result
+
+    return result[:max_chars]
+
+def read_pptx(path, max_chars=DEFAULT_MAX_CHARS):
+    from pptx import Presentation
+
+    path = Path(path)
+
+    presentation = Presentation(str(path))
+
+    parts = []
+
+    total_chars = 0
+
+    for slide in presentation.slides:
+
+        for shape in slide.shapes:
+
+            if not hasattr(shape, "text"):
+                continue
+
+            text = shape.text.strip()
+
+            if not text:
+                continue
+
+            if max_chars is None:
+
+                parts.append(text)
+
+                continue
+
+            remaining = max_chars - total_chars
+
+            if remaining <= 0:
+                break
+
+            text = text[:remaining]
+
+            parts.append(text)
+
+            total_chars += len(text)
+
+        if max_chars is not None and total_chars >= max_chars:
+            break
+
+    result = "\n".join(parts)
+
+    if max_chars is None:
+        return result
+
+    return result[:max_chars]
+
+def read_xlsx(path, max_chars=DEFAULT_MAX_CHARS):
+
+    from openpyxl import load_workbook
+
+    path = Path(path)
+
+    workbook = load_workbook(
+        filename=str(path),
+        read_only=True,
+        data_only=True,
+    )
+
+    parts = []
+
+    total_chars = 0
+
+    try:
+
+        for worksheet in workbook.worksheets:
+
+            for row in worksheet.iter_rows(
+                values_only=True
+            ):
+
+                values = []
+
+                for value in row:
+
+                    if value is None:
+                        continue
+
+                    values.append(
+                        str(value)
+                    )
+
+                if not values:
+                    continue
+
+                text = " | ".join(values)
+
+                if max_chars is None:
+
+                    parts.append(text)
+
+                    continue
+
+                remaining = (
+                    max_chars - total_chars
+                )
+
+                if remaining <= 0:
+                    break
+
+                text = text[:remaining]
+
+                parts.append(text)
+
+                total_chars += len(text)
+
+            if max_chars is not None and total_chars >= max_chars:
+                break
+
+    finally:
+
+        workbook.close()
+
+    result = "\n".join(parts)
+
+    if max_chars is None:
+        return result
+
+    return result[:max_chars]
 
 def read_file(
     path,
     max_chars=DEFAULT_MAX_CHARS,
-) -> str:
-    """
-    Read a supported file and return extracted text.
+):
 
-    Parameters
-    ----------
-    path:
-        Real filesystem path.
-
-    max_chars:
-        Maximum amount of text returned.
-
-    Returns
-    -------
-    str
-        Extracted text.
-
-    Raises
-    ------
-    FileNotFoundError
-        If the file doesn't exist.
-
-    ValueError
-        If the file format isn't supported.
-    """
-
-    path = Path(path).resolve()
-
-    # -----------------------------------------------------
-    # Validate file
-    # -----------------------------------------------------
+    path = Path(path)
 
     if not path.exists():
 
         raise FileNotFoundError(
-            f"Artifact does not exist: {path}"
+            f"File does not exist: {path}"
         )
 
     if not path.is_file():
@@ -142,69 +252,50 @@ def read_file(
 
     extension = path.suffix.lower()
 
-    # -----------------------------------------------------
-    # Select reader
-    # -----------------------------------------------------
-
     if extension == ".txt":
 
-        text = read_txt(path)
-
-    elif extension == ".pdf":
-
-        text = read_pdf(path)
-
-    elif extension == ".docx":
-
-        text = read_docx(path)
-
-    else:
-
-        raise ValueError(
-            f"Unsupported file type: {extension}"
+        return read_txt(
+            path,
+            max_chars,
         )
 
-    # -----------------------------------------------------
-    # Normalize text
-    # -----------------------------------------------------
+    if extension == ".pdf":
 
-    text = text.strip()
+        return read_pdf(
+            path,
+            max_chars,
+        )
 
-    # -----------------------------------------------------
-    # Limit returned content
-    # -----------------------------------------------------
+    if extension == ".docx":
 
-    if max_chars is not None:
+        return read_docx(
+            path,
+            max_chars,
+        )
 
-        text = text[:max_chars]
+    if extension == ".pptx":
 
-    return text
+        return read_pptx(
+            path,
+            max_chars,
+        )
 
+    if extension == ".xlsx":
 
-# ---------------------------------------------------------
-# Read using an Artifact Registry record
-# ---------------------------------------------------------
+        return read_xlsx(
+            path,
+            max_chars,
+        )
+
+    raise ValueError(
+        f"Unsupported file type: {extension}"
+    )
 
 def read_artifact(
     registry,
     artifact_id,
     max_chars=DEFAULT_MAX_CHARS,
 ):
-    """
-    Read an artifact using its registry ID.
-
-    Flow:
-
-        artifact_id
-             ↓
-        registry.get()
-             ↓
-        real file path
-             ↓
-        read_file()
-             ↓
-        extracted text
-    """
 
     artifact = registry.get(
         artifact_id
@@ -213,93 +304,40 @@ def read_artifact(
     if artifact is None:
 
         raise ValueError(
-            f"Artifact not found in registry: "
-            f"{artifact_id}"
+            f"Artifact not found: {artifact_id}"
         )
-
-    # -----------------------------------------------------
-    # Make sure registry doesn't point to a missing file
-    # -----------------------------------------------------
 
     if artifact["status"] != "active":
 
-        raise FileNotFoundError(
+        raise ValueError(
             f"Artifact is not active: "
-            f"{artifact['path']}"
+            f"{artifact_id}"
         )
 
-    # -----------------------------------------------------
-    # Read the actual file
-    # -----------------------------------------------------
-
-    return read_file(
-        artifact["path"],
-        max_chars=max_chars,
+    path = Path(
+        artifact["path"]
     )
 
-
-
-# ---------------------------------------------------------
-# Update registry with extracted content
-# ---------------------------------------------------------
+    return read_file(
+        path,
+        max_chars=max_chars,
+    )
 
 def update_artifact_snippet(
     registry,
     artifact_id,
     max_chars=1000,
 ):
-    """
-    Read an artifact and store a short content snippet
-    in the Artifact Registry.
 
-    Flow:
-
-        artifact_id
-             ↓
-        registry.get()
-             ↓
-        real file path
-             ↓
-        read_file()
-             ↓
-        extracted text
-             ↓
-        content_snippet
-             ↓
-        SQLite
-    """
-
-    artifact = registry.get(artifact_id)
-
-    if artifact is None:
-        raise ValueError(
-            f"Artifact not found: {artifact_id}"
-        )
-
-    text = read_file(
-        artifact["path"],
+    text = read_artifact(
+        registry,
+        artifact_id,
         max_chars=max_chars,
     )
 
-    # -----------------------------------------------------
-    # Store extracted snippet
-    # -----------------------------------------------------
-
-    registry.conn.execute(
-        """
-        UPDATE artifacts
-        SET
-            content_snippet = ?,
-            last_seen = ?
-        WHERE id = ?
-        """,
-        (
-            text,
-            artifact["last_seen"],
-            artifact_id,
-        ),
+    registry.update_content_snippet(
+        artifact_id,
+        text,
     )
-
-    registry.conn.commit()
 
     return text
