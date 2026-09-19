@@ -1,69 +1,62 @@
-"""
-Artifact Matcher
-
-Stage 1:
-    Python candidate filtering and ranking.
-
-Stage 2:
-    Local Qwen semantic reranking through Ollama.
-
-The LLM is never allowed to invent artifact IDs or paths.
-Python validates the returned artifact ID.
-"""
-
 import json
-import re
 
 from rapidfuzz import fuzz
-from ollama import chat
 
 from artifacts.registry import ArtifactRegistry
-from artifacts.file_reader import read_artifact
-
-
-# ---------------------------------------------------------
-# Stage 1 — Python candidate shortlist
-# ---------------------------------------------------------
+from llm.qwen_client import ask_qwen_json
 
 def shortlist_candidates(
     requirement,
     registry: ArtifactRegistry,
     top_k=6,
 ):
-    """
-    Produce a small candidate set using deterministic
-    Python filtering and filename similarity.
-    """
 
     artifact_type = requirement.get(
         "artifact_type",
         "unknown",
     )
 
-    # Filter by artifact type first.
     if artifact_type != "unknown":
-        pool = registry.search_by_type(
+        artifacts = registry.search_by_type(
             artifact_type
         )
     else:
-        pool = registry.all_active()
+        artifacts = registry.all_active()
 
-    query_text = (
-        f"{requirement.get('name', '')} "
-        f"{requirement.get('evidence', '')}"
+    requirement_text = " ".join(
+        str(value)
+        for value in [
+            requirement.get("name", ""),
+            requirement.get("description", ""),
+            requirement.get("evidence", ""),
+            requirement.get("keywords", ""),
+        ]
+        if value
     ).strip()
 
     scored = []
 
-    for artifact in pool:
+    for artifact in artifacts:
+        candidate_text = " ".join(
+            str(value)
+            for value in [
+                artifact["name"],
+                artifact["artifact_type"],
+                artifact["content_snippet"] or "",
+            ]
+            if value
+        )
 
         score = fuzz.token_set_ratio(
-            query_text.lower(),
-            artifact["name"].lower(),
+            requirement_text,
+            candidate_text,
         )
 
         scored.append(
-            (score, artifact)
+            (
+                score,
+                artifact,
+            )
         )
 
     scored.sort(
@@ -73,253 +66,296 @@ def shortlist_candidates(
 
     return [
         artifact
-        for score, artifact in scored[:top_k]
+        for _, artifact
+        in scored[:top_k]
     ]
-
-
-# ---------------------------------------------------------
-# Stage 2 — Build Qwen candidate prompt
-# ---------------------------------------------------------
 
 def _build_qwen_prompt(
     requirement,
     candidates,
 ):
-    """
-    Build a strict prompt containing only real candidate IDs.
-    """
 
-    candidate_text = []
+    candidate_blocks = []
 
-    for artifact in candidates:
+    for candidate in candidates:
 
-        candidate_text.append(
+        candidate_blocks.append(
             f"""
-ARTIFACT ID: {artifact['id']}
-NAME: {artifact['name']}
-TYPE: {artifact['artifact_type']}
-PATH: {artifact['path']}
-CONTENT:
-{artifact['content_snippet'] or '[No snippet available]'}
+Artifact ID:
+{candidate["id"]}
+
+Artifact name:
+{candidate["name"]}
+
+Artifact type:
+{candidate["artifact_type"]}
+
+Artifact path:
+{candidate["path"]}
+
+Artifact content snippet:
+{candidate["content_snippet"] or "[No content snippet available]"}
 """.strip()
         )
 
-    candidates_block = "\n\n".join(
-        candidate_text
+    candidates_text = "\n\n".join(
+        candidate_blocks
     )
 
     return f"""
-You are an artifact matching assistant.
+You are selecting an existing local artifact for a
+Google Classroom assignment requirement.
 
-Your task is to select the artifact that best satisfies
-the assignment requirement.
+You MUST choose ONLY from the candidate artifacts
+provided below.
 
-ASSIGNMENT REQUIREMENT
-----------------------
-Name:
-{requirement.get('name', '')}
+You MUST NOT invent:
+    - artifact IDs
+    - file paths
+    - filenames
 
-Evidence:
-{requirement.get('evidence', '')}
+If none of the candidates is appropriate, select null.
 
-Artifact type:
-{requirement.get('artifact_type', 'unknown')}
+Assignment requirement:
+{json.dumps(requirement, indent=2)}
 
-CANDIDATE ARTIFACTS
--------------------
-{candidates_block}
+Candidate artifacts:
+{candidates_text}
 
-IMPORTANT RULES
----------------
-1. Select ONLY one artifact ID from the candidates above.
-2. NEVER invent an artifact ID.
-3. NEVER invent a file path.
-4. Base your decision on the artifact name, type, and content.
-5. If none of the candidates satisfies the requirement,
-   return null.
-6. Return ONLY valid JSON.
-
-Required JSON format:
+Return ONLY a JSON object with exactly these fields:
 
 {{
     "selected_artifact_id": "EXACT_CANDIDATE_ID_OR_NULL",
     "confidence": 0.0,
     "reason": "short explanation"
 }}
+
+Rules:
+
+1. selected_artifact_id must be one of the provided
+   candidate artifact IDs or null.
+
+2. Never create a new artifact ID.
+
+3. Never create a new path.
+
+4. Do not select an artifact merely because its filename
+   looks similar.
+
+5. Consider the artifact name, type, and content snippet.
+
+6. If there is insufficient evidence, return null.
+
+7. confidence must be between 0.0 and 1.0.
 """.strip()
 
-
-# ---------------------------------------------------------
-# Parse Qwen JSON
-# ---------------------------------------------------------
-
 def _parse_qwen_response(response_text):
-    """
-    Extract JSON from Qwen's response.
 
-    Handles both clean JSON and JSON surrounded by
-    markdown fences.
-    """
+    if not response_text:
+        return None
 
-    text = response_text.strip()
+    try:
+        data = json.loads(
+            response_text
+        )
+    except json.JSONDecodeError as error:
 
-    # Remove markdown code fences if Qwen adds them.
-    text = re.sub(
-        r"^```(?:json)?\s*",
-        "",
-        text,
-        flags=re.IGNORECASE,
-    )
-
-    text = re.sub(
-        r"\s*```$",
-        "",
-        text,
-    )
-
-    # Find the JSON object.
-    match = re.search(
-        r"\{.*\}",
-        text,
-        flags=re.DOTALL,
-    )
-
-    if not match:
-        raise ValueError(
-            "Qwen did not return a JSON object."
+        print(
+            "[matcher] Qwen returned invalid JSON: "
+            f"{error}"
         )
 
-    return json.loads(
-        match.group(0)
+        return None
+
+    if not isinstance(data, dict):
+
+        print(
+            "[matcher] Qwen JSON response is not "
+            "an object."
+        )
+
+        return None
+
+    if "selected_artifact_id" not in data:
+
+        print(
+            "[matcher] Qwen response is missing "
+            "selected_artifact_id."
+        )
+
+        return None
+
+    selected_id = data.get(
+        "selected_artifact_id"
     )
 
+    if selected_id in (
+        None,
+        "",
+        "null",
+        "None",
+    ):
 
-# ---------------------------------------------------------
-# Qwen semantic reranking
-# ---------------------------------------------------------
+        selected_id = None
+
+    data["selected_artifact_id"] = selected_id
+
+    confidence = data.get(
+        "confidence",
+        0.0,
+    )
+
+    try:
+
+        confidence = float(
+            confidence
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+
+        confidence = 0.0
+
+    confidence = max(
+        0.0,
+        min(
+            1.0,
+            confidence,
+        ),
+    )
+
+    data["confidence"] = confidence
+
+    reason = data.get(
+        "reason",
+        "",
+    )
+
+    if reason is None:
+
+        reason = ""
+
+    data["reason"] = str(
+        reason
+    )
+
+    return data
 
 def rerank_with_qwen(
     requirement,
     candidates,
-    model="qwen3:latest",
 ):
-    """
-    Ask local Qwen to semantically select the best
-    artifact from the candidate set.
-
-    Returns the validated artifact row or None.
-    """
 
     if not candidates:
-        return None
 
-    candidate_ids = {
-        artifact["id"]
-        for artifact in candidates
-    }
+        print(
+            "[matcher] No candidates available "
+            "for Qwen reranking."
+        )
+
+        return None
 
     prompt = _build_qwen_prompt(
         requirement,
         candidates,
     )
 
-    print(
-        "\n[matcher] Sending candidates to Qwen..."
-    )
+    try:
 
-    response = chat(
-        model=model,
-        messages=[
-            {
-                "role": "user",
-                "content": prompt,
-            }
-        ],
-    )
+        response_text = ask_qwen_json(
+            prompt,
+            temperature=0.0,
+        )
 
-    response_text = response["message"]["content"]
+    except Exception as error:
+
+        print(
+            "[matcher] Qwen request failed: "
+            f"{error}"
+        )
+        return None
 
     print(
         "\n[matcher] Qwen response:"
     )
 
-    print(response_text)
-
-    # -----------------------------------------------------
-    # Parse response
-    # -----------------------------------------------------
+    print(
+        response_text
+    )
 
     result = _parse_qwen_response(
         response_text
     )
 
-    selected_id = result.get(
-        "selected_artifact_id"
-    )
+    if result is None:
+        return None
 
-    # -----------------------------------------------------
-    # Hard validation
-    # -----------------------------------------------------
+    selected_id = result[
+        "selected_artifact_id"
+    ]
 
     if selected_id is None:
+        print("[matcher] Qwen found no suitable artifact.")
+        return None
+
+    candidate_ids = {
+        candidate["id"]
+        for candidate in candidates
+    }
+
+    if selected_id not in candidate_ids:
+
         print(
-            "[matcher] Qwen selected no artifact."
+            "[matcher] Qwen returned an invalid "
+            "artifact ID."
+        )
+
+        print(
+            f"[matcher] Invalid ID: {selected_id}"
+        )
+
+        print(
+            "[matcher] Treating this as no match."
         )
 
         return None
 
-    if selected_id not in candidate_ids:
+    selected_artifact = next(
+        (
+            candidate
+            for candidate in candidates
+            if candidate["id"] == selected_id
+        ),
+        None,
+    )
 
-        raise ValueError(
-            "Qwen returned an artifact ID that was "
-            "not present in the candidate set: "
-            f"{selected_id}"
+
+    if selected_artifact is None:
+
+        print(
+            "[matcher] Selected artifact could not "
+            "be resolved from candidates."
         )
 
-    # -----------------------------------------------------
-    # Return the actual Python artifact object
-    # -----------------------------------------------------
-
-    selected_artifact = next(
-        artifact
-        for artifact in candidates
-        if artifact["id"] == selected_id
-    )
+        return None
 
     return {
         "artifact": selected_artifact,
-        "confidence": result.get(
-            "confidence",
-            0.0,
-        ),
-        "reason": result.get(
-            "reason",
-            "",
-        ),
+        "confidence": result[
+            "confidence"
+        ],
+        "reason": result[
+            "reason"
+        ],
     }
-
-
-# ---------------------------------------------------------
-# Complete matching pipeline
-# ---------------------------------------------------------
 
 def match_artifact(
     requirement,
     registry: ArtifactRegistry,
     top_k=6,
-    model="qwen3:latest",
 ):
-    """
-    Complete artifact matching pipeline.
-
-    1. Python creates candidates.
-    2. Qwen semantically reranks them.
-    3. Python validates the returned ID.
-    """
-
-    print(
-        "\n[matcher] Creating candidate shortlist..."
-    )
 
     candidates = shortlist_candidates(
         requirement,
@@ -328,21 +364,63 @@ def match_artifact(
     )
 
     print(
-        f"[matcher] Candidates found: "
-        f"{len(candidates)}"
+        f"[matcher] Shortlisted "
+        f"{len(candidates)} candidate(s)."
     )
 
-    if not candidates:
-        return None
+    for candidate in candidates:
 
-    # -----------------------------------------------------
-    # Send candidate information to Qwen
-    # -----------------------------------------------------
+        print(
+            f"    - {candidate['id']} | "
+            f"{candidate['name']} | "
+            f"{candidate['artifact_type']}"
+        )
 
     result = rerank_with_qwen(
         requirement,
         candidates,
-        model=model,
     )
 
-    return result 
+    if result is None:
+
+        print(
+            "[matcher] No validated artifact match."
+        )
+
+        return None
+
+    artifact = result[
+        "artifact"
+    ]
+
+    print(
+        "\n[matcher] Artifact selected:"
+    )
+
+    print(
+        f"    ID: {artifact['id']}"
+    )
+
+    print(
+        f"    Name: {artifact['name']}"
+    )
+
+    print(
+        f"    Type: {artifact['artifact_type']}"
+    )
+
+    print(
+        f"    Path: {artifact['path']}"
+    )
+
+    print(
+        f"    Confidence: "
+        f"{result['confidence']:.2f}"
+    )
+
+    print(
+        f"    Reason: "
+        f"{result['reason']}"
+    )
+
+    return result
