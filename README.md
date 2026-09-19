@@ -48,4 +48,20 @@ Architecture:
     %% Registry connection
     P --> H
 
+| Technology           | Purpose                              |
+| -------------------- | ------------------------------------ |
+| Python               | Core application                     |
+| Google Classroom API | Classroom data retrieval             |
+| Google Drive API     | Classroom file downloads             |
+| SQLite               | Artifact registry                    |
+| Watchdog             | Real-time filesystem monitoring      |
+| Qwen3                | AI reasoning and summarization       |
+| Ollama               | Local LLM runtime                    |
+| Playwright           | Browser automation                   |
+| PyMuPDF              | PDF processing                       |
+| python-docx          | DOCX processing                      |
+| python-pptx          | PPTX processing                      |
+| openpyxl             | XLSX processing                      |
+| RapidFuzz            | Initial artifact candidate filtering |
+
 
