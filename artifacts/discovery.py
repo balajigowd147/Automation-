@@ -1,49 +1,34 @@
-"""
-Artifact discovery system.
-
-Part 1:
-    Initial filesystem scan.
-
-This module finds existing files in configured directories
-and registers them in the Artifact Registry.
-"""
-
 from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from artifacts.registry import ArtifactRegistry
-
-
-# ---------------------------------------------------------
-# Supported artifact extensions
-# ---------------------------------------------------------
+import os
 
 DEFAULT_EXTENSIONS = {
     ".pdf",
     ".docx",
     ".txt",
-    ".png",
-    ".jpg",
-    ".jpeg",
     ".pptx",
     ".xlsx",
-    ".zip",
+}
+
+EXCLUDED_DIR_NAMES = {
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "node_modules",
+    "datasets",
+    "dataset",
+    "data",
+    "cache",
+    "caches",
+    "tmp",
+    "temp",
 }
 
 
-# ---------------------------------------------------------
-# Artifact type detection
-# ---------------------------------------------------------
-
 def guess_artifact_type(name: str) -> str:
-    """
-    Guess the artifact type from the filename.
-
-    This is intentionally a simple heuristic.
-
-    The matcher/LLM will perform more intelligent
-    matching later.
-    """
 
     lowered = name.lower()
 
@@ -59,141 +44,92 @@ def guess_artifact_type(name: str) -> str:
     return "unknown"
 
 
-# ---------------------------------------------------------
-# Initial filesystem scan
-# ---------------------------------------------------------
+def iter_supported_files(root, extensions, excluded_dirs=None):
+
+    root = Path(root)
+
+    if excluded_dirs is None:
+        excluded_dirs = EXCLUDED_DIR_NAMES
+
+    excluded = {
+        name.lower()
+        for name in excluded_dirs
+    }
+
+    for current_root, dir_names, file_names in os.walk(root):
+
+        dir_names[:] = [
+            name
+            for name in dir_names
+            if name.lower() not in excluded
+        ]
+
+        current_path = Path(current_root)
+
+        for file_name in file_names:
+            path = current_path / file_name
+
+            if path.suffix.lower() in extensions:
+                yield path
 
 def initial_scan(
     registry: ArtifactRegistry,
     root_dirs,
     extensions=DEFAULT_EXTENSIONS,
 ):
-    """
-    Scan the configured directories recursively.
-
-    Every supported file found is registered in SQLite.
-
-    Parameters
-    ----------
-    registry:
-        ArtifactRegistry instance.
-
-    root_dirs:
-        List of directories to scan.
-
-    extensions:
-        File extensions that should be registered.
-
-    Returns
-    -------
-    int
-        Number of files discovered.
-    """
-
     count = 0
 
     for root in root_dirs:
 
         root_path = Path(root)
 
-        # Skip directories that don't exist.
         if not root_path.exists():
             print(
-                f"[discovery] Directory does not exist: "
-                f"{root_path}"
-            )
-            continue
-
-        if not root_path.is_dir():
-            print(
-                f"[discovery] Not a directory: "
-                f"{root_path}"
+                f"[discovery] Root does not exist: {root_path}"
             )
             continue
 
         print(
-            f"[discovery] Scanning: "
-            f"{root_path.resolve()}"
+            f"[discovery] Scanning: {root_path}"
         )
 
-        # Recursively walk through the directory.
-        for path in root_path.rglob("*"):
-
-            # Ignore directories.
-            if not path.is_file():
-                continue
-
-            # Only process supported extensions.
-            if path.suffix.lower() not in extensions:
-                continue
+        for path in iter_supported_files(
+            root_path,
+            extensions,
+        ):
 
             artifact_type = guess_artifact_type(
                 path.name
             )
 
-            artifact_id = registry.register(
-                path,
+            registry.register(
+                str(path),
                 artifact_type=artifact_type,
-                source="discovered",
             )
 
-            if artifact_id:
-                count += 1
+            count += 1
 
-                print(
-                    f"[discovery] Registered: "
-                    f"{path.name} "
-                    f"-> {artifact_type} "
-                    f"({artifact_id})"
-                )
+            print(
+                f"[discovery] Registered: "
+                f"{path.name} -> {artifact_type}"
+            )
 
     print(
-        f"\n[discovery] Initial scan complete."
-        f" Registered/updated {count} files."
+        f"\n[discovery] Initial scan complete. "
+        f"Registered/updated {count} files."
     )
 
-    return count
-
-
-# ---------------------------------------------------------
-# Startup reconciliation
-# ---------------------------------------------------------
-
 def reconcile(registry: ArtifactRegistry):
-    """
-    Reconcile the SQLite registry with the actual filesystem.
 
-    This is executed when the agent starts.
-
-    It detects:
-
-    1. Files that were deleted while the agent was OFF.
-    2. Files that were modified while the agent was OFF.
-    3. Files whose size/mtime changed.
-    4. Files that may have been moved and later discovered
-       under another path.
-
-    The registry is updated accordingly.
-    """
 
     print("\n[discovery] Starting reconciliation...")
-
-    # Get all artifacts that the registry currently considers active.
     active_artifacts = registry.all_active()
 
     missing_candidates = []
 
-    # -----------------------------------------------------
-    # Check every registered artifact
-    # -----------------------------------------------------
-
     for artifact in active_artifacts:
 
         path = Path(artifact["path"])
-
-        # -------------------------------------------------
-        # File no longer exists
-        # -------------------------------------------------
 
         if not path.exists():
 
@@ -205,10 +141,6 @@ def reconcile(registry: ArtifactRegistry):
             missing_candidates.append(artifact)
 
             continue
-
-        # -------------------------------------------------
-        # File still exists
-        # -------------------------------------------------
 
         try:
             stat = path.stat()
@@ -222,10 +154,6 @@ def reconcile(registry: ArtifactRegistry):
 
             continue
 
-        # -------------------------------------------------
-        # Detect modification
-        # -------------------------------------------------
-
         if (
             stat.st_mtime != artifact["mtime"]
             or stat.st_size != artifact["size"]
@@ -235,30 +163,19 @@ def reconcile(registry: ArtifactRegistry):
                 f"[discovery] File changed: "
                 f"{path}"
             )
-
-            # Re-registering causes the registry to
-            # recalculate the quick fingerprint.
             registry.register(
                 path,
                 artifact_type=artifact["artifact_type"],
                 source=artifact["source"],
             )
 
-    # -----------------------------------------------------
-    # Handle files that disappeared
-    # -----------------------------------------------------
-
     for artifact in missing_candidates:
 
         old_path = Path(artifact["path"])
-
-        # Try to find an active artifact with the same
-        # quick content fingerprint.
         matches = registry.find_by_hash(
             artifact["content_hash"]
         )
 
-        # Only consider a different path as a possible move.
         moved_candidates = [
             match
             for match in matches
@@ -274,10 +191,6 @@ def reconcile(registry: ArtifactRegistry):
                 f"\n    Old: {old_path}"
                 f"\n    New: {new_artifact['path']}"
             )
-
-            # The new path is already registered.
-            # Keep the old database row for history,
-            # but mark it as missing.
             registry.mark_missing(old_path)
 
         else:
@@ -293,17 +206,7 @@ def reconcile(registry: ArtifactRegistry):
         "[discovery] Reconciliation complete."
     )
 
-
-
-# ---------------------------------------------------------
-# Real-time filesystem watcher
-# ---------------------------------------------------------
-
 class RegistryEventHandler(FileSystemEventHandler):
-    """
-    Handles filesystem events and keeps the Artifact Registry
-    synchronized in real time.
-    """
 
     def __init__(
         self,
@@ -315,10 +218,6 @@ class RegistryEventHandler(FileSystemEventHandler):
         self.registry = registry
         self.extensions = extensions
 
-    # -----------------------------------------------------
-    # Check whether a file is relevant
-    # -----------------------------------------------------
-
     def _relevant(self, path_str):
         """
         Return True if the file has a supported extension.
@@ -329,14 +228,7 @@ class RegistryEventHandler(FileSystemEventHandler):
             in self.extensions
         )
 
-    # -----------------------------------------------------
-    # File created
-    # -----------------------------------------------------
-
-    def on_created(self, event):
-        """
-        Called when a new file is created.
-        """
+    def on_created(self, event): 
 
         if event.is_directory:
             return
@@ -345,10 +237,6 @@ class RegistryEventHandler(FileSystemEventHandler):
             return
 
         path = Path(event.src_path)
-
-        # A file may be created before its contents are
-        # completely written. We therefore make sure it
-        # exists before attempting registration.
         if not path.exists():
             return
 
@@ -369,10 +257,6 @@ class RegistryEventHandler(FileSystemEventHandler):
                 f"({artifact_id})"
             )
 
-    # -----------------------------------------------------
-    # File modified
-    # -----------------------------------------------------
-
     def on_modified(self, event):
         """
         Called when an existing file is modified.
@@ -389,17 +273,11 @@ class RegistryEventHandler(FileSystemEventHandler):
         if not path.exists():
             return
 
-        existing = self.registry.conn.execute(
-    """
-    SELECT artifact_type
-    FROM artifacts
-    WHERE path = ?
-    """,
-    (str(path.resolve()),)).fetchone()
+        row = self.registry.get_by_path(path)
 
         artifact_type = (
-            existing["artifact_type"]
-            if existing
+            row["artifact_type"]
+            if row
             else guess_artifact_type(path.name)
         )
 
@@ -415,10 +293,6 @@ class RegistryEventHandler(FileSystemEventHandler):
                 f"{path} "
                 f"({artifact_id})"
             )
-
-    # -----------------------------------------------------
-    # File deleted
-    # -----------------------------------------------------
 
     def on_deleted(self, event):
         """
@@ -440,18 +314,8 @@ class RegistryEventHandler(FileSystemEventHandler):
             f"{event.src_path}"
         )
 
-    # -----------------------------------------------------
-    # File moved / renamed
-    # -----------------------------------------------------
-
     def on_moved(self, event):
-        """
-        Called when a file is moved or renamed.
 
-        The registry keeps the same artifact ID.
-        """
-
-        # We only care about files.
         if event.is_directory:
             return
 
@@ -462,18 +326,11 @@ class RegistryEventHandler(FileSystemEventHandler):
         new_relevant = self._relevant(
             event.dest_path
         )
-
-        # If neither side is a supported artifact,
-        # ignore the event.
         if not old_relevant and not new_relevant:
             return
 
         old_path = Path(event.src_path)
         new_path = Path(event.dest_path)
-
-        # -------------------------------------------------
-        # Supported → Supported
-        # -------------------------------------------------
 
         if old_relevant and new_relevant:
 
@@ -489,10 +346,6 @@ class RegistryEventHandler(FileSystemEventHandler):
 
             return
 
-        # -------------------------------------------------
-        # Supported → Unsupported
-        # -------------------------------------------------
-
         if old_relevant and not new_relevant:
 
             self.registry.mark_missing(
@@ -506,10 +359,6 @@ class RegistryEventHandler(FileSystemEventHandler):
             )
 
             return
-
-        # -------------------------------------------------
-        # Unsupported → Supported
-        # -------------------------------------------------
 
         if not old_relevant and new_relevant:
 
@@ -531,27 +380,10 @@ class RegistryEventHandler(FileSystemEventHandler):
                     f"({artifact_id})"
                 )
 
-
-# ---------------------------------------------------------
-# Start filesystem watcher
-# ---------------------------------------------------------
-
 def start_watcher(
     registry: ArtifactRegistry,
     root_dirs,
 ):
-    """
-    Start the filesystem watcher.
-
-    The watcher runs in the background.
-
-    Returns
-    -------
-    Observer
-        The watchdog observer instance.
-
-    The caller is responsible for stopping it.
-    """
 
     handler = RegistryEventHandler(
         registry
@@ -604,9 +436,6 @@ def start_watcher(
 
     return observer
 
-# ---------------------------------------------------------
-# Register files created/downloaded by the agent
-# ---------------------------------------------------------
 
 def register_agent_file(
     registry: ArtifactRegistry,
@@ -614,36 +443,8 @@ def register_agent_file(
     artifact_type="unknown",
     downloaded=False,
 ):
-    """
-    Immediately register a file created or downloaded
-    by the agent.
-
-    Parameters
-    ----------
-    registry:
-        ArtifactRegistry instance.
-
-    path:
-        Path of the created/downloaded file.
-
-    artifact_type:
-        Known artifact type if available.
-
-    downloaded:
-        True  -> agent_downloaded
-        False -> agent_created
-
-    Returns
-    -------
-    str | None
-        Artifact ID if registration succeeds.
-    """
 
     path = Path(path)
-
-    # -----------------------------------------------------
-    # Make sure the file actually exists
-    # -----------------------------------------------------
 
     if not path.exists() or not path.is_file():
         print(
@@ -653,28 +454,16 @@ def register_agent_file(
 
         return None
 
-    # -----------------------------------------------------
-    # Determine source
-    # -----------------------------------------------------
-
     source = (
         "agent_downloaded"
         if downloaded
         else "agent_created"
     )
 
-    # -----------------------------------------------------
-    # If type wasn't explicitly supplied, infer it
-    # -----------------------------------------------------
-
     if artifact_type == "unknown":
         artifact_type = guess_artifact_type(
             path.name
         )
-
-    # -----------------------------------------------------
-    # Register immediately
-    # -----------------------------------------------------
 
     artifact_id = registry.register(
         path,
