@@ -3,16 +3,7 @@ import ollama
 from llm.schemas import AssignmentAnalysis
 
 
-# --------------------------------
-# LLM configuration
-# --------------------------------
-
 MODEL_NAME = "qwen3:latest"
-
-
-# --------------------------------
-# Analyze assignment
-# --------------------------------
 
 def analyze_with_llm(prompt):
 
@@ -33,10 +24,9 @@ def analyze_with_llm(prompt):
         }
     )
 
-    # Get JSON text returned by Ollama
+
     raw_response = response["message"]["content"]
 
-    # Validate JSON against our Pydantic model
     analysis = AssignmentAnalysis.model_validate_json(
         raw_response
     )
