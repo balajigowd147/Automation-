@@ -17,55 +17,35 @@ Managing assignments across multiple Google Classroom courses can involve repeti
 - Turning in assignments
 
 Architecture:
-                    ┌──────────────────────┐
-                    │   GOOGLE CLASSROOM   │
-                    └──────────┬───────────┘
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │  CLASSROOM API       │
-                    │  + POLLER            │
-                    └──────────┬───────────┘
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │      AI ROUTER       │
-                    └──────────┬───────────┘
-                               │
-                 ┌─────────────┴─────────────┐
-                 │                           │
-                 ▼                           ▼
-        ┌─────────────────┐        ┌─────────────────┐
-        │   ASSIGNMENT    │        │ STUDY MATERIAL  │
-        │     FLOW        │        │      FLOW       │
-        └────────┬────────┘        └────────┬────────┘
-                 │                          │
-                 ▼                          ▼
-        ┌─────────────────┐        ┌─────────────────┐
-        │ Submission      │        │ Download +      │
-        │ Status Check    │        │ File Reader     │
-        └────────┬────────┘        └────────┬────────┘
-                 │                          │
-                 ▼                          ▼
-        ┌─────────────────┐        ┌─────────────────┐
-        │ Artifact        │        │ Qwen3           │
-        │ Matcher         │        │ Summarization   │
-        │ Python + Qwen3  │        └────────┬────────┘
-        └────────┬────────┘                 │
-                 │                          ▼
-                 ▼                   ┌─────────────────┐
-        ┌─────────────────┐          │ Summary Output  │
-        │ Correct Artifact│          └─────────────────┘
-        └────────┬────────┘
-                 │
-                 ▼
-        ┌─────────────────┐
-        │    Playwright   │
-        │ Browser Agent   │
-        └────────┬────────┘
-                 │
-                 ▼
-        ┌─────────────────┐
-        │ Upload → Review │
-        │     → Turn In   │
-        └─────────────────┘
+    A[Google Classroom] --> B[Classroom API]
+    B --> C[Classroom Poller]
+    C --> D[AI Router]
+
+    D --> E[Assignment Flow]
+    D --> F[Study Material Flow]
+
+    %% Assignment Flow
+    E --> G[Submission Status Check]
+    G --> H[Artifact Matcher]
+    H --> I[Python + Qwen3]
+    I --> J[Correct Artifact]
+    J --> K[Playwright Browser Agent]
+    K --> L[Upload]
+    L --> M[Human Review]
+    M --> N[Turn In]
+
+    %% Study Material Flow
+    F --> O[Download Material]
+    O --> P[Artifact Registry]
+    P --> Q[File Reader]
+    Q --> R[Qwen3 Summarization]
+    R --> S[Summary Output]
+
+    %% Local Documents
+    T[Local Documents] --> U[Watchdog]
+    U --> P
+
+    %% Registry connection
+    P --> H
+
+
