@@ -2,14 +2,11 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 
-# Persistent browser profile
-# This keeps your Google Classroom login/session.
 PROFILE_DIR = Path.cwd() / "playwright_profile"
 
 
 def open_classroom():
 
-    print("\n===== STARTING PLAYWRIGHT =====")
 
     playwright = sync_playwright().start()
 
@@ -41,8 +38,6 @@ def open_classroom():
 
 def open_course(page, course_link):
 
-    print("\n===== OPENING COURSE =====")
-
     page.goto(course_link)
 
     page.wait_for_load_state(
@@ -53,8 +48,6 @@ def open_course(page, course_link):
 
 
 def read_assignment(page):
-
-    print("\n===== ASSIGNMENT PAGE =====")
 
     page.wait_for_timeout(2000)
 
@@ -69,8 +62,6 @@ def read_assignment(page):
 
 def open_assignment(page, assignment_link):
 
-    print("\n===== OPENING ASSIGNMENT =====")
-
     page.goto(assignment_link)
 
     page.wait_for_load_state(
@@ -81,5 +72,4 @@ def open_assignment(page, assignment_link):
 
     print("Opened:", page.url)
 
-    # Read the assignment page
     return read_assignment(page)

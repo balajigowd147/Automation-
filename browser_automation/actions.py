@@ -3,7 +3,6 @@ from pathlib import Path
 
 def open_add_or_create(page):
 
-    print("\n===== OPENING ADD OR CREATE =====")
 
     button = page.get_by_role(
         "button",
@@ -19,9 +18,6 @@ def open_add_or_create(page):
 
 def find_browse(page):
 
-    """
-    Search all available frames for the visible Browse element.
-    """
 
     print("\nSearching for Browse...")
 
@@ -51,9 +47,6 @@ def find_browse(page):
 
 def upload_file(page, file_path):
 
-    print("\n===== UPLOADING FILE =====")
-
-    # Convert the supplied path into an absolute path
     file_path = Path(
         file_path
     ).resolve()
@@ -113,9 +106,6 @@ def upload_file(page, file_path):
         "File chooser opened."
     )
 
-    # --------------------------------
-    # 4. Select local file
-    # --------------------------------
 
     file_chooser.set_files(
         str(file_path)
@@ -126,9 +116,6 @@ def upload_file(page, file_path):
         file_path
     )
 
-    # --------------------------------
-    # 5. Wait for Google Drive upload
-    # --------------------------------
 
     page.wait_for_timeout(
         5000
@@ -141,12 +128,6 @@ def upload_file(page, file_path):
 
 def review_before_turn_in(page):
 
-    print("\n")
-    print("=" * 60)
-    print("           ASSIGNMENT REVIEW")
-    print("=" * 60)
-
-    print("\nCurrent Classroom page:")
 
     assignment_text = page.locator(
         "body"
@@ -154,7 +135,6 @@ def review_before_turn_in(page):
 
     print(assignment_text)
 
-    print("\n" + "=" * 60)
 
     print(
         "The browser is open so you can visually inspect"
@@ -163,8 +143,6 @@ def review_before_turn_in(page):
     print(
         "the assignment and uploaded files."
     )
-
-    print("=" * 60)
 
     input(
         "\nPress Enter after you have reviewed the page..."
@@ -191,12 +169,6 @@ def review_before_turn_in(page):
 
 def turn_in_assignment(page):
 
-    print(
-        "\n===== TURNING IN ASSIGNMENT ====="
-    )
-
-    # Give Classroom time to update
-    # the "Your work" section.
     page.wait_for_timeout(
         2000
     )
@@ -213,7 +185,6 @@ def turn_in_assignment(page):
 
     visible_turn_in = None
 
-    # Wait up to approximately 10 seconds
     for _ in range(20):
 
         for i in range(
@@ -247,7 +218,6 @@ def turn_in_assignment(page):
         "Visible Turn in found."
     )
 
-    # The text is inside the clickable parent
     turn_in_button = (
         visible_turn_in.locator("..")
     )

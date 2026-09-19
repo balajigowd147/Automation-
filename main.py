@@ -19,15 +19,6 @@ from browser_automation.actions import (
 
 def main():
 
-    print("\n========================================")
-    print("      GOOGLE CLASSROOM AUTOMATION")
-    print("========================================")
-
-
-    # --------------------------------
-    # 1. Connect to Classroom API
-    # --------------------------------
-
     print("\nConnecting to Google Classroom API...")
 
     service = get_classroom_service()
@@ -38,20 +29,10 @@ def main():
         f"Courses found: {len(courses)}"
     )
 
-
-    # --------------------------------
-    # 2. Start Playwright
-    # --------------------------------
-
     playwright, context, page = open_classroom()
 
 
     try:
-
-        # --------------------------------
-        # 3. Find an assignment
-        # --------------------------------
-
         for course in courses:
 
             assignments = get_assignments(
@@ -64,10 +45,6 @@ def main():
 
             assignment = assignments[0]
 
-            print("\n========================================")
-            print("COURSE")
-            print("========================================")
-
             print(
                 "Course:",
                 course["name"]
@@ -78,27 +55,13 @@ def main():
                 assignment["title"]
             )
 
-
-            # --------------------------------
-            # 4. Open assignment
-            # --------------------------------
-
             open_assignment(
                 page,
                 assignment["alternateLink"]
             )
 
-
-            # --------------------------------
-            # 5. Open Add or create
-            # --------------------------------
-
             open_add_or_create(page)
 
-
-            # --------------------------------
-            # 6. Upload local file
-            # --------------------------------
 
             upload_file(
                 page,
@@ -106,18 +69,9 @@ def main():
             )
 
 
-            # --------------------------------
-            # 7. User review + approval
-            # --------------------------------
-
             approved = review_before_turn_in(
                 page
             )
-
-
-            # --------------------------------
-            # 8. Turn in only if approved
-            # --------------------------------
 
             if approved:
 
@@ -131,12 +85,6 @@ def main():
                     "\nAssignment was NOT submitted."
                 )
 
-
-            # --------------------------------
-            # Currently process only one
-            # assignment for testing
-            # --------------------------------
-
             break
 
 
@@ -145,7 +93,6 @@ def main():
         print("========================================")
 
 
-        # Keep browser open so you can inspect it
         input(
             "\nPress Enter to close the browser..."
         )
@@ -153,9 +100,6 @@ def main():
 
     finally:
 
-        # --------------------------------
-        # 9. Close Playwright safely
-        # --------------------------------
 
         if not page.is_closed():
 
