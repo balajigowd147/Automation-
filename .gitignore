@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Secrets / OAuth
+credentials.json
+token.json
+*.json
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Playwright
+playwright_profile/
+
+# Local data
+data/
+outputs/
+
+# Generated / downloaded files
+downloads/
+classroom_materials/
+
+# Environment variables
+.env
+.env.*
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
